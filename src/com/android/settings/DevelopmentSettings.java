@@ -809,7 +809,9 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
         updateRootAccessOptions();
         updateAdvancedRebootOptions();
         updateDevelopmentShortcutOptions();
-        updateMSOBOptions();
+        if (mUpdateRecovery != null) {
+            updateUpdateRecoveryOptions();
+        }
         if (mColorTemperaturePreference != null) {
             updateColorTemperature();
         }
@@ -905,6 +907,9 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
         resetAdbNotifyOptions();
         resetVerifyAppsOverUsbOptions();
         resetDevelopmentShortcutOptions();
+        if (mUpdateRecovery != null) {
+            resetUpdateRecoveryOptions();
+        }
         writeAnimationScaleOption(0, mWindowAnimationScale, null);
         writeAnimationScaleOption(1, mTransitionAnimationScale, null);
         writeAnimationScaleOption(2, mAnimatorDurationScale, null);
@@ -1234,7 +1239,7 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
     }
 
     private static boolean showEnableMultiWindowPreference() {
-        return true;
+        return !"user".equals(Build.TYPE);
     }
 
     private void setEnableMultiWindow(boolean value) {
@@ -1963,6 +1968,30 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
                 .show();
     }
 
+    private void updateUpdateRecoveryOptions() {
+        updateSwitchPreference(mUpdateRecovery, SystemProperties.getBoolean(
+                UPDATE_RECOVERY_PROPERTY, false));
+    }
+
+    private void writeUpdateRecoveryOptions() {
+        SystemProperties.set(UPDATE_RECOVERY_PROPERTY,
+                mUpdateRecovery.isChecked() ? "true" : "false");
+        pokeSystemProperties();
+    }
+
+    private static void resetUpdateRecoveryOptions() {
+        // User builds should update recovery by default
+        if ("user".equals(Build.TYPE)) {
+            SystemProperties.set(UPDATE_RECOVERY_PROPERTY, "true");
+        }
+    }
+
+    public static void initializeUpdateRecoveryOption() {
+        if (TextUtils.isEmpty(SystemProperties.get(UPDATE_RECOVERY_PROPERTY))) {
+            resetUpdateRecoveryOptions();
+        }
+    }
+
     @Override
     public void onSwitchChanged(Switch switchView, boolean isChecked) {
         if (switchView != mSwitchBar.getSwitch()) {
@@ -2211,6 +2240,28 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
             writeDevelopmentShortcutOptions();
         } else if (preference == mKillAppLongpressBack) {
             writeKillAppLongpressBackOptions();
+        } else if (preference == mUpdateRecovery) {
+            if (mSwitchBar.isChecked()) {
+                if (mUpdateRecoveryDialog != null) {
+                    dismissDialogs();
+                }
+                if (mUpdateRecovery.isChecked()) {
+                    mUpdateRecoveryDialog = new AlertDialog.Builder(getActivity()).setMessage(
+                            getResources().getString(R.string.update_recovery_on_warning))
+                            .setTitle(R.string.update_recovery_title)
+                            .setPositiveButton(android.R.string.yes, this)
+                            .setNegativeButton(android.R.string.no, this)
+                            .show();
+                } else {
+                    mUpdateRecoveryDialog = new AlertDialog.Builder(getActivity()).setMessage(
+                            getResources().getString(R.string.update_recovery_off_warning))
+                            .setTitle(R.string.update_recovery_title)
+                            .setPositiveButton(android.R.string.yes, this)
+                            .setNegativeButton(android.R.string.no, this)
+                            .show();
+                }
+                mUpdateRecoveryDialog.setOnDismissListener(this);
+            }
         } else {
             return super.onPreferenceTreeClick(preferenceScreen, preference);
         }
@@ -2337,6 +2388,10 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
             mRootDialog.dismiss();
             mRootDialog = null;
         }
+        if (mUpdateRecoveryDialog != null) {
+            mUpdateRecoveryDialog.dismiss();
+            mUpdateRecoveryDialog = null;
+        }
     }
 
     public void onClick(DialogInterface dialog, int which) {
@@ -2394,6 +2449,10 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
                 // Reset the option
                 writeRootAccessOptions("0");
             }
+        } else if (dialog == mUpdateRecoveryDialog) {
+            if (which == DialogInterface.BUTTON_POSITIVE) {
+                writeUpdateRecoveryOptions();
+            }
         }
     }
 
@@ -2418,6 +2477,9 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
         } else if (dialog == mAllowSignatureFakeDialog) {
             updateAllowSignatureFakeOption();
             mAllowSignatureFakeDialog = null;
+        } else if (dialog == mUpdateRecoveryDialog) {
+            updateUpdateRecoveryOptions();
+            mUpdateRecoveryDialog = null;
         }
     }
 
@@ -2445,7 +2507,12 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
     static class SystemPropPoker extends AsyncTask<Void, Void, Void> {
         @Override
         protected Void doInBackground(Void... params) {
-            String[] services = ServiceManager.listServices();
+            String[] services;
+            try {
+                services = ServiceManager.listServices();
+            } catch (RemoteException e) {
+                return null;
+            }
             for (String service : services) {
                 IBinder obj = ServiceManager.checkService(service);
                 if (obj != null) {
